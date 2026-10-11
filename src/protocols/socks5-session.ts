@@ -36,6 +36,45 @@ function appendBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
 	return combined;
 }
 
+function waitForSocketOpen(opened: Promise<unknown>, signal: AbortSignal): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		let settled = false;
+
+		const cleanup = (): void => {
+			signal.removeEventListener('abort', onAbort);
+		};
+
+		const finish = (error?: unknown): void => {
+			if (settled) {
+				return;
+			}
+
+			settled = true;
+			cleanup();
+
+			if (error !== undefined) {
+				reject(error);
+			} else {
+				resolve();
+			}
+		};
+
+		const onAbort = (): void => {
+			finish(new Error('Session closed while TCP was opening'));
+		};
+
+		signal.addEventListener('abort', onAbort, { once: true });
+		void opened.then(
+			() => finish(),
+			(error: unknown) => finish(error),
+		);
+
+		if (signal.aborted) {
+			onAbort();
+		}
+	});
+}
+
 export function createSocks5SessionHandler(username: string, password: string, dial: TcpDialer = dialTcp): SessionHandler {
 	if (!areValidSocks5Credentials(username, password)) {
 		throw new RangeError('SOCKS5 username and password must each be 1–255 UTF-8 bytes');
@@ -46,6 +85,17 @@ export function createSocks5SessionHandler(username: string, password: string, d
 		let webSocketWriter: WritableStreamDefaultWriter<Uint8Array> | undefined = session.writable.getWriter();
 		let socket: TcpSocket | undefined;
 		let bridge: TcpBridge | undefined;
+		let abortCloseHandler: (() => void) | undefined;
+		let socketClosePromise: Promise<void> | undefined;
+
+		const closeSocket = (): Promise<void> => {
+			if (!socket) {
+				return Promise.resolve();
+			}
+
+			socketClosePromise ??= Promise.resolve().then(() => socket!.close());
+			return socketClosePromise;
+		};
 
 		const readNext = async (): Promise<Uint8Array | undefined> => {
 			if (!reader) {
@@ -123,13 +173,30 @@ export function createSocks5SessionHandler(username: string, password: string, d
 
 			try {
 				socket = await dial(request.hostname, request.port);
-				await socket.opened;
+				abortCloseHandler = () => {
+					void closeSocket().catch(() => undefined);
+				};
+				session.signal.addEventListener('abort', abortCloseHandler, { once: true });
+
+				if (session.signal.aborted) {
+					abortCloseHandler();
+				}
+				await waitForSocketOpen(socket.opened, session.signal);
 			} catch {
-				await writeToWebSocket(encodeSocks5Reply(0x01));
+				if (!session.signal.aborted) {
+					await writeToWebSocket(encodeSocks5Reply(0x01));
+				}
 				return;
 			}
 
+			if (session.signal.aborted) {
+				return;
+			}
 			await writeToWebSocket(encodeSocks5Reply(0x00));
+
+			if (session.signal.aborted) {
+				return;
+			}
 
 			reader.releaseLock();
 			reader = undefined;
@@ -147,6 +214,14 @@ export function createSocks5SessionHandler(username: string, password: string, d
 				}
 			}
 
+			if (session.signal.aborted) {
+				return;
+			}
+
+			if (abortCloseHandler) {
+				session.signal.removeEventListener('abort', abortCloseHandler);
+				abortCloseHandler = undefined;
+			}
 			bridge = startTcpBridge(session, socket);
 
 			// Raw SOCKS5 over WebSocket has no control frame for TCP
@@ -157,17 +232,16 @@ export function createSocks5SessionHandler(username: string, password: string, d
 				throw result.error;
 			}
 		} finally {
+			if (abortCloseHandler) {
+				session.signal.removeEventListener('abort', abortCloseHandler);
+			}
 			reader?.releaseLock();
 			webSocketWriter?.releaseLock();
 
 			if (bridge) {
 				await bridge.close().catch(() => undefined);
 			} else if (socket) {
-				try {
-					await socket.close();
-				} catch {
-					// The socket may already have closed after a connection error.
-				}
+				await closeSocket().catch(() => undefined);
 			}
 		}
 	};
