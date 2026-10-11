@@ -219,45 +219,37 @@ export function attachWebSocketTransport(webSocket: WebSocket, options: WebSocke
 		{ highWaterMark: 0 },
 	);
 
-	const writable = new WritableStream<Uint8Array>(
-		{
-			write(data) {
-				if (!(data instanceof Uint8Array)) {
-					throw new TypeError('Expected Uint8Array');
-				}
+	const writable = new WritableStream<Uint8Array>({
+		write(data) {
+			if (!(data instanceof Uint8Array)) {
+				throw new TypeError('Expected Uint8Array');
+			}
 
-				if (data.byteLength === 0) {
-					return;
-				}
+			if (data.byteLength === 0) {
+				return;
+			}
 
-				if (failure !== undefined || socketClosed || closeRequested || webSocket.readyState !== WebSocket.OPEN) {
-					throw failure ?? new Error('WebSocket is not open');
-				}
+			if (failure !== undefined || socketClosed || closeRequested || webSocket.readyState !== WebSocket.OPEN) {
+				throw failure ?? new Error('WebSocket is not open');
+			}
 
-				try {
-					webSocket.send(data);
-				} catch (error) {
-					const sendError = toError(error, 'WebSocket send failed');
-					fail(sendError, 1011, 'WebSocket send failed');
-					throw sendError;
-				}
-			},
-
-			close() {
-				requestClose(1000, 'WebSocket byte stream completed');
-			},
-
-			abort(reason) {
-				fail(toError(reason, 'WebSocket writable stream aborted'), 1011, 'WebSocket output aborted');
-			},
+			try {
+				webSocket.send(data);
+			} catch (error) {
+				const sendError = toError(error, 'WebSocket send failed');
+				fail(sendError, 1011, 'WebSocket send failed');
+				throw sendError;
+			}
 		},
-		{
-			// This bounds the Streams API's desired size in bytes; it does
-			// not measure or bound the Worker's internal network send buffer.
-			highWaterMark: options.maxQueuedIncomingBytes,
-			size: (data) => data.byteLength,
+
+		close() {
+			requestClose(1000, 'WebSocket byte stream completed');
 		},
-	);
+
+		abort(reason) {
+			fail(toError(reason, 'WebSocket writable stream aborted'), 1011, 'WebSocket output aborted');
+		},
+	});
 
 	webSocket.addEventListener('message', onMessage);
 	webSocket.addEventListener('close', onClose);
