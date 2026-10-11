@@ -179,6 +179,17 @@ export function attachWebSocketTransport(webSocket: WebSocket, options: WebSocke
 		});
 
 		detachListeners();
+		if (webSocket.readyState === WebSocket.CLOSING) {
+			try {
+				webSocket.close(event.code, event.reason);
+			} catch {
+				try {
+					webSocket.close();
+				} catch {
+					// The runtime may have completed the close concurrently.
+				}
+			}
+		}
 	}
 
 	function onError(): void {

@@ -3,10 +3,19 @@ import { attachWebSocketTransport } from './transports/websocket';
 
 export interface TunnelWorkerEnvironment {
 	TUNNEL_PATH?: string;
+	SOCKS5_USERNAME?: string;
+	SOCKS5_PASSWORD?: string;
 }
+
+export type SessionHandlerFactory = (env: TunnelWorkerEnvironment) => SessionHandler | undefined;
+
+// Cloudflare Workers allows WebSocket messages up to 32 MiB. This queue limit
+// permits one maximum-sized message to queue while bounding delayed consumption.
+export const MAX_QUEUED_INCOMING_BYTES = 32 * 1024 * 1024;
 
 export interface TunnelWorkerOptions {
 	sessionHandler?: SessionHandler;
+	sessionHandlerFactory?: SessionHandlerFactory;
 	maxQueuedIncomingBytes?: number;
 }
 
@@ -17,9 +26,11 @@ function isValidTunnelPath(path: string | undefined): path is string {
 }
 
 export function createTunnelWorker(options: TunnelWorkerOptions = {}) {
-	const { sessionHandler, maxQueuedIncomingBytes } = options;
+	const { sessionHandler: configuredSessionHandler, sessionHandlerFactory, maxQueuedIncomingBytes } = options;
 
-	if (sessionHandler !== undefined && (!Number.isSafeInteger(maxQueuedIncomingBytes) || (maxQueuedIncomingBytes ?? 0) <= 0)) {
+	const hasHandlerConfiguration = configuredSessionHandler !== undefined || sessionHandlerFactory !== undefined;
+
+	if (hasHandlerConfiguration && (!Number.isSafeInteger(maxQueuedIncomingBytes) || (maxQueuedIncomingBytes ?? 0) <= 0)) {
 		throw new RangeError('A positive maxQueuedIncomingBytes is required when a session handler is configured');
 	}
 
@@ -49,9 +60,9 @@ export function createTunnelWorker(options: TunnelWorkerOptions = {}) {
 				});
 			}
 
-			// Do not accept unauthenticated, protocol-less tunnel sessions.
-			// A protocol handler will be supplied when protocol integration begins.
-			if (sessionHandler === undefined) {
+			const sessionHandler = sessionHandlerFactory ? sessionHandlerFactory(env) : configuredSessionHandler;
+
+			if (sessionHandler === undefined || maxQueuedIncomingBytes === undefined) {
 				return new Response('Session handler unavailable', { status: 503 });
 			}
 
@@ -60,11 +71,11 @@ export function createTunnelWorker(options: TunnelWorkerOptions = {}) {
 			const server = pair[1];
 
 			const transport = attachWebSocketTransport(server, {
-				maxQueuedIncomingBytes: maxQueuedIncomingBytes as number,
+				maxQueuedIncomingBytes,
 			});
 
-			// Attach transport listeners and configure binaryType before accept().
-			server.accept();
+			// Proxy sessions coordinate both sides of the close handshake.
+			server.accept({ allowHalfOpen: true });
 
 			void runSession(transport, sessionHandler).then(
 				(result) => {

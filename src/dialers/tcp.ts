@@ -11,5 +11,5 @@ export interface TcpSocket {
 export type TcpDialer = (hostname: string, port: number) => TcpSocket | Promise<TcpSocket>;
 
 export function dialTcp(hostname: string, port: number): TcpSocket {
-	return connect({ hostname, port });
+	return connect({ hostname, port }, { allowHalfOpen: true });
 }

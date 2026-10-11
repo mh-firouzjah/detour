@@ -17,12 +17,12 @@ describe('TCP dialer', () => {
 		['example.com', 443],
 		['192.0.2.10', 8080],
 		['2001:db8::10', 8443],
-	])('passes destination %s:%i to connect unchanged', (hostname, port) => {
+	])('passes destination %s:%i to connect unchanged with half-open mode', (hostname, port) => {
 		const socket = {} as unknown as ReturnType<typeof connect>;
 		mockedConnect.mockReturnValue(socket);
 
 		expect(dialTcp(hostname, port)).toBe(socket);
-		expect(mockedConnect.mock.calls).toEqual([[{ hostname, port }]]);
+		expect(mockedConnect.mock.calls).toEqual([[{ hostname, port }, { allowHalfOpen: true }]]);
 	});
 
 	it('propagates synchronous connection errors', () => {
