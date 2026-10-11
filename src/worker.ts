@@ -5,12 +5,12 @@ export interface TunnelWorkerEnvironment {
 	TUNNEL_PATH?: string;
 	SOCKS5_USERNAME?: string;
 	SOCKS5_PASSWORD?: string;
+	VLESS_PATH?: string;
+	VLESS_UUID?: string;
 }
 
-export type SessionHandlerFactory = (env: TunnelWorkerEnvironment) => SessionHandler | undefined;
+export type SessionHandlerFactory = (env: TunnelWorkerEnvironment, pathname: string) => SessionHandler | undefined;
 
-// Cloudflare Workers allows WebSocket messages up to 32 MiB. This queue limit
-// permits one maximum-sized message to queue while bounding delayed consumption.
 export const MAX_QUEUED_INCOMING_BYTES = 32 * 1024 * 1024;
 
 export interface TunnelWorkerOptions {
@@ -36,13 +36,20 @@ export function createTunnelWorker(options: TunnelWorkerOptions = {}) {
 
 	return {
 		async fetch(request: Request, env: TunnelWorkerEnvironment): Promise<Response> {
-			const tunnelPath = env.TUNNEL_PATH;
+			const candidatePaths = [env.TUNNEL_PATH, env.VLESS_PATH];
+			const configuredPaths = candidatePaths.filter((path): path is string => path !== undefined);
 
-			if (!isValidTunnelPath(tunnelPath)) {
+			if (
+				configuredPaths.length === 0 ||
+				candidatePaths.some((path) => path !== undefined && !isValidTunnelPath(path)) ||
+				new Set(configuredPaths).size !== configuredPaths.length
+			) {
 				return new Response('Service unavailable', { status: 503 });
 			}
 
-			if (new URL(request.url).pathname !== tunnelPath) {
+			const pathname = new URL(request.url).pathname;
+
+			if (!configuredPaths.includes(pathname)) {
 				return new Response('Not found', { status: 404 });
 			}
 
@@ -60,7 +67,7 @@ export function createTunnelWorker(options: TunnelWorkerOptions = {}) {
 				});
 			}
 
-			const sessionHandler = sessionHandlerFactory ? sessionHandlerFactory(env) : configuredSessionHandler;
+			const sessionHandler = sessionHandlerFactory ? sessionHandlerFactory(env, pathname) : configuredSessionHandler;
 
 			if (sessionHandler === undefined || maxQueuedIncomingBytes === undefined) {
 				return new Response('Session handler unavailable', { status: 503 });
@@ -74,7 +81,6 @@ export function createTunnelWorker(options: TunnelWorkerOptions = {}) {
 				maxQueuedIncomingBytes,
 			});
 
-			// Proxy sessions coordinate both sides of the close handshake.
 			server.accept({ allowHalfOpen: true });
 
 			void runSession(transport, sessionHandler).then(
