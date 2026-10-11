@@ -1,4 +1,5 @@
 import { areValidSocks5Credentials, createSocks5SessionHandler } from './protocols/socks5-session';
+import { createTrojanSessionHandler } from './protocols/trojan-session';
 import { createVlessSessionHandler } from './protocols/vless-session';
 import { isValidVlessUuid } from './protocols/vless';
 import { createTunnelWorker, MAX_QUEUED_INCOMING_BYTES, type TunnelWorkerEnvironment } from './worker';
@@ -25,6 +26,16 @@ const tunnelWorker = createTunnelWorker({
 			}
 
 			return createVlessSessionHandler(uuid);
+		}
+
+		if (pathname === env.TROJAN_PATH) {
+			const password = env.TROJAN_PASSWORD;
+
+			if (password === undefined || password.length === 0) {
+				return undefined;
+			}
+
+			return createTrojanSessionHandler(password);
 		}
 
 		return undefined;

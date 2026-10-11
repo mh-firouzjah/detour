@@ -7,6 +7,8 @@ export interface TunnelWorkerEnvironment {
 	SOCKS5_PASSWORD?: string;
 	VLESS_PATH?: string;
 	VLESS_UUID?: string;
+	TROJAN_PATH?: string;
+	TROJAN_PASSWORD?: string;
 }
 
 export type SessionHandlerFactory = (env: TunnelWorkerEnvironment, pathname: string) => SessionHandler | undefined;
@@ -36,7 +38,7 @@ export function createTunnelWorker(options: TunnelWorkerOptions = {}) {
 
 	return {
 		async fetch(request: Request, env: TunnelWorkerEnvironment): Promise<Response> {
-			const candidatePaths = [env.TUNNEL_PATH, env.VLESS_PATH];
+			const candidatePaths = [env.TUNNEL_PATH, env.VLESS_PATH, env.TROJAN_PATH];
 			const configuredPaths = candidatePaths.filter((path): path is string => path !== undefined);
 
 			if (
