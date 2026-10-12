@@ -9,6 +9,7 @@ export interface TunnelWorkerEnvironment {
 	VLESS_UUID?: string;
 	TROJAN_PATH?: string;
 	TROJAN_PASSWORD?: string;
+	TCP_CONNECT_TIMEOUT_MS?: string;
 }
 
 export type SessionHandlerFactory = (env: TunnelWorkerEnvironment, pathname: string) => SessionHandler | undefined;

@@ -1,3 +1,4 @@
+import { dialTcp, resolveTcpConnectTimeoutMs, type TcpDialer } from './dialers/tcp';
 import { areValidSocks5Credentials, createSocks5SessionHandler } from './protocols/socks5-session';
 import { createTrojanSessionHandler } from './protocols/trojan-session';
 import { createVlessSessionHandler } from './protocols/vless-session';
@@ -7,6 +8,9 @@ import { createTunnelWorker, MAX_QUEUED_INCOMING_BYTES, type TunnelWorkerEnviron
 const tunnelWorker = createTunnelWorker({
 	maxQueuedIncomingBytes: MAX_QUEUED_INCOMING_BYTES,
 	sessionHandlerFactory(env, pathname) {
+		const timeoutMs = resolveTcpConnectTimeoutMs(env.TCP_CONNECT_TIMEOUT_MS);
+		const dial: TcpDialer = (hostname, port) => dialTcp(hostname, port, timeoutMs);
+
 		if (pathname === env.TUNNEL_PATH) {
 			const username = env.SOCKS5_USERNAME;
 			const password = env.SOCKS5_PASSWORD;
@@ -15,7 +19,7 @@ const tunnelWorker = createTunnelWorker({
 				return undefined;
 			}
 
-			return createSocks5SessionHandler(username, password);
+			return createSocks5SessionHandler(username, password, dial);
 		}
 
 		if (pathname === env.VLESS_PATH) {
@@ -25,7 +29,7 @@ const tunnelWorker = createTunnelWorker({
 				return undefined;
 			}
 
-			return createVlessSessionHandler(uuid);
+			return createVlessSessionHandler(uuid, dial);
 		}
 
 		if (pathname === env.TROJAN_PATH) {
@@ -35,7 +39,7 @@ const tunnelWorker = createTunnelWorker({
 				return undefined;
 			}
 
-			return createTrojanSessionHandler(password);
+			return createTrojanSessionHandler(password, dial);
 		}
 
 		return undefined;

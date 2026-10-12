@@ -18,10 +18,20 @@ describe('TCP dialer', () => {
 		['192.0.2.10', 8080],
 		['2001:db8::10', 8443],
 	])('passes destination %s:%i to connect unchanged with half-open mode', (hostname, port) => {
-		const socket = {} as unknown as ReturnType<typeof connect>;
-		mockedConnect.mockReturnValue(socket);
+		const socket = {
+			readable: new ReadableStream<Uint8Array>(),
+			writable: new WritableStream<Uint8Array>(),
+			opened: Promise.resolve(),
+			closed: new Promise<void>(() => undefined),
+			close: vi.fn(async () => undefined),
+		};
 
-		expect(dialTcp(hostname, port)).toBe(socket);
+		mockedConnect.mockReturnValue(socket as unknown as ReturnType<typeof connect>);
+
+		const result = dialTcp(hostname, port);
+
+		expect(result.readable).toBe(socket.readable);
+		expect(result.writable).toBe(socket.writable);
 		expect(mockedConnect.mock.calls).toEqual([[{ hostname, port }, { allowHalfOpen: true }]]);
 	});
 
