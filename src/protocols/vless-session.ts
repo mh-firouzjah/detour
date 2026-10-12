@@ -1,6 +1,7 @@
 import { dialTcp, type TcpDialer, type TcpSocket } from '../dialers/tcp';
 import { startTcpBridge, type TcpBridge } from '../core/tcp-bridge';
 import type { SessionHandler } from '../core/session';
+import { startHandshakeDeadline } from './handshake-deadline';
 import { isValidVlessUuid, parseVlessRequest, parseVlessUuid, type VlessRequest } from './vless';
 
 // Addons are currently unsupported, so the largest accepted VLESS header is
@@ -80,6 +81,7 @@ export function createVlessSessionHandler(uuid: string, dial: TcpDialer = dialTc
 	return async (session) => {
 		let reader: ReadableStreamDefaultReader<Uint8Array> | undefined = session.readable.getReader();
 		let webSocketWriter: WritableStreamDefaultWriter<Uint8Array> | undefined = session.writable.getWriter();
+		const clearHandshakeDeadline = startHandshakeDeadline(session.close);
 		let socket: TcpSocket | undefined;
 		let bridge: TcpBridge | undefined;
 		let abortCloseHandler: (() => void) | undefined;
@@ -140,6 +142,8 @@ export function createVlessSessionHandler(uuid: string, dial: TcpDialer = dialTc
 				}
 				break;
 			}
+
+			clearHandshakeDeadline();
 
 			try {
 				const dialTask = Promise.resolve()
@@ -242,6 +246,7 @@ export function createVlessSessionHandler(uuid: string, dial: TcpDialer = dialTc
 				throw result.error;
 			}
 		} finally {
+			clearHandshakeDeadline();
 			if (abortCloseHandler) {
 				session.signal.removeEventListener('abort', abortCloseHandler);
 			}

@@ -2,6 +2,7 @@ import { dialTcp, type TcpDialer, type TcpSocket } from '../dialers/tcp';
 import { startTcpBridge, type TcpBridge } from '../core/tcp-bridge';
 import type { SessionHandler } from '../core/session';
 import { hashTrojanPassword, MAX_TROJAN_HEADER_BYTES, parseTrojanRequest, type TrojanRequest } from './trojan';
+import { startHandshakeDeadline } from './handshake-deadline';
 
 function appendBytes(left: Uint8Array, right: Uint8Array): Uint8Array<ArrayBufferLike> {
 	const combined = new Uint8Array(left.byteLength + right.byteLength);
@@ -63,6 +64,7 @@ export function createTrojanSessionHandler(password: string, dial: TcpDialer = d
 
 	return async (session) => {
 		let reader: ReadableStreamDefaultReader<Uint8Array> | undefined = session.readable.getReader();
+		const clearHandshakeDeadline = startHandshakeDeadline(session.close);
 		let socket: TcpSocket | undefined;
 		let bridge: TcpBridge | undefined;
 		let abortCloseHandler: (() => void) | undefined;
@@ -127,6 +129,8 @@ export function createTrojanSessionHandler(password: string, dial: TcpDialer = d
 			if (!request) {
 				throw new Error('Trojan request parsing finished without a complete request');
 			}
+
+			clearHandshakeDeadline();
 
 			const completeRequest = request;
 			const pendingDial = Promise.resolve().then(() => dial(completeRequest.hostname, completeRequest.port));
@@ -212,6 +216,7 @@ export function createTrojanSessionHandler(password: string, dial: TcpDialer = d
 				throw result.error;
 			}
 		} finally {
+			clearHandshakeDeadline();
 			if (abortCloseHandler) {
 				session.signal.removeEventListener('abort', abortCloseHandler);
 			}

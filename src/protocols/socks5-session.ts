@@ -1,6 +1,7 @@
 import { dialTcp, type TcpDialer, type TcpSocket } from '../dialers/tcp';
 import { startTcpBridge, type TcpBridge } from '../core/tcp-bridge';
 import type { SessionHandler } from '../core/session';
+import { startHandshakeDeadline } from './handshake-deadline';
 import {
 	Socks5Negotiator,
 	Socks5RequestError,
@@ -36,15 +37,15 @@ function appendBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
 	return combined;
 }
 
-function waitForSocketOpen(opened: Promise<unknown>, signal: AbortSignal): Promise<void> {
-	return new Promise<void>((resolve, reject) => {
+function waitForSessionOperation<T>(operation: PromiseLike<T>, signal: AbortSignal): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
 		let settled = false;
 
 		const cleanup = (): void => {
 			signal.removeEventListener('abort', onAbort);
 		};
 
-		const finish = (error?: unknown): void => {
+		const finish = (result: { type: 'resolve'; value: T } | { type: 'reject'; error: unknown }): void => {
 			if (settled) {
 				return;
 			}
@@ -52,21 +53,21 @@ function waitForSocketOpen(opened: Promise<unknown>, signal: AbortSignal): Promi
 			settled = true;
 			cleanup();
 
-			if (error !== undefined) {
-				reject(error);
+			if (result.type === 'reject') {
+				reject(result.error);
 			} else {
-				resolve();
+				resolve(result.value);
 			}
 		};
 
 		const onAbort = (): void => {
-			finish(new Error('Session closed while TCP was opening'));
+			finish({ type: 'reject', error: new Error('Session closed while TCP was opening') });
 		};
 
 		signal.addEventListener('abort', onAbort, { once: true });
-		void opened.then(
-			() => finish(),
-			(error: unknown) => finish(error),
+		void Promise.resolve(operation).then(
+			(value) => finish({ type: 'resolve', value }),
+			(error: unknown) => finish({ type: 'reject', error }),
 		);
 
 		if (signal.aborted) {
@@ -83,6 +84,7 @@ export function createSocks5SessionHandler(username: string, password: string, d
 	return async (session) => {
 		let reader: ReadableStreamDefaultReader<Uint8Array> | undefined = session.readable.getReader();
 		let webSocketWriter: WritableStreamDefaultWriter<Uint8Array> | undefined = session.writable.getWriter();
+		const clearHandshakeDeadline = startHandshakeDeadline(session.close);
 		let socket: TcpSocket | undefined;
 		let bridge: TcpBridge | undefined;
 		let abortCloseHandler: (() => void) | undefined;
@@ -171,8 +173,22 @@ export function createSocks5SessionHandler(username: string, password: string, d
 				requestBuffer = appendBytes(requestBuffer, data);
 			}
 
+			clearHandshakeDeadline();
+
 			try {
-				socket = await dial(request.hostname, request.port);
+				const pendingDial = Promise.resolve(dial(request.hostname, request.port));
+				void pendingDial.then(
+					(lateSocket) => {
+						if (session.signal.aborted) {
+							void Promise.resolve()
+								.then(() => lateSocket.close())
+								.catch(() => undefined);
+						}
+					},
+					() => undefined,
+				);
+
+				socket = await waitForSessionOperation(pendingDial, session.signal);
 				abortCloseHandler = () => {
 					void closeSocket().catch(() => undefined);
 				};
@@ -181,7 +197,7 @@ export function createSocks5SessionHandler(username: string, password: string, d
 				if (session.signal.aborted) {
 					abortCloseHandler();
 				}
-				await waitForSocketOpen(socket.opened, session.signal);
+				await waitForSessionOperation(socket.opened, session.signal);
 			} catch {
 				if (!session.signal.aborted) {
 					await writeToWebSocket(encodeSocks5Reply(0x01));
@@ -232,6 +248,7 @@ export function createSocks5SessionHandler(username: string, password: string, d
 				throw result.error;
 			}
 		} finally {
+			clearHandshakeDeadline();
 			if (abortCloseHandler) {
 				session.signal.removeEventListener('abort', abortCloseHandler);
 			}
