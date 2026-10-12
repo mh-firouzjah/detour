@@ -8,12 +8,13 @@
 		"start": "wrangler dev",
 		"test": "vitest",
 		"cf-typegen": "wrangler types",
-		"format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-		"format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+		"format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"test/integration/**/*.mjs\" \"docs/live-testing.md\" \"docs/peer-project-review.md\"",
+		"format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"test/integration/**/*.mjs\" \"docs/live-testing.md\" \"docs/peer-project-review.md\"",
 		"lint": "eslint src test",
 		"typecheck": "tsc --noEmit",
-		"check": "npm run format:check && npm run lint && npm run typecheck && npm test -- --run",
-		"fix": "npm run format && npm run lint -- --fix && npm run format:check"
+		"check": "node --check test/integration/live-worker.mjs && npm run format:check && npm run lint && npm run typecheck && npm test -- --run",
+		"fix": "npm run format && npm run lint -- --fix && npm run format:check",
+		"test:live": "node test/integration/live-worker.mjs"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-plugin": "^1.0.0",

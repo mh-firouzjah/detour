@@ -48,6 +48,17 @@ const tunnelWorker = createTunnelWorker({
 
 export default {
 	fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
-		return tunnelWorker.fetch(request, env as unknown as TunnelWorkerEnvironment);
+		const bindings = env as unknown as Record<string, string | undefined>;
+		const mappedEnvironment: TunnelWorkerEnvironment = {
+			TUNNEL_PATH: bindings.A0 ?? bindings.TUNNEL_PATH,
+			SOCKS5_USERNAME: bindings.B1 ?? bindings.SOCKS5_USERNAME,
+			SOCKS5_PASSWORD: bindings.B2 ?? bindings.SOCKS5_PASSWORD,
+			VLESS_PATH: bindings.C1 ?? bindings.VLESS_PATH,
+			VLESS_UUID: bindings.C2 ?? bindings.VLESS_UUID,
+			TROJAN_PATH: bindings.D1 ?? bindings.TROJAN_PATH,
+			TROJAN_PASSWORD: bindings.D2 ?? bindings.TROJAN_PASSWORD,
+			TCP_CONNECT_TIMEOUT_MS: bindings.E1 ?? bindings.TCP_CONNECT_TIMEOUT_MS,
+		};
+		return tunnelWorker.fetch(request, mappedEnvironment);
 	},
 } satisfies ExportedHandler<Env>;
